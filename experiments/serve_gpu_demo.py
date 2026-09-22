@@ -18,6 +18,7 @@ from ocr_pipeline.correction import LexiconCorrectionStage
 from ocr_pipeline.demo import (
     MAX_DECODED_PIXELS,
     MAX_DOCUMENT_PAGES,
+    MAX_PAGE_PIXELS,
     CompositionDescriptor,
     _read_presentations,
     create_app,
@@ -522,6 +523,8 @@ def create_verified_app(
         app_options["max_pages"] = args.max_document_pages
     if hasattr(args, "max_decoded_pixels"):
         app_options["max_decoded_pixels"] = args.max_decoded_pixels
+    if hasattr(args, "max_page_pixels"):
+        app_options["max_page_pixels"] = args.max_page_pixels
     katex_asset_root = getattr(args, "katex_asset_root", None)
     if katex_asset_root is not None:
         app_options["katex_asset_root"] = katex_asset_root
@@ -644,6 +647,12 @@ def _parser() -> argparse.ArgumentParser:
         type=_positive_int,
         default=MAX_DECODED_PIXELS,
         help="Maximum total decoded pixels per uploaded document",
+    )
+    parser.add_argument(
+        "--max-page-pixels",
+        type=_positive_int,
+        default=MAX_PAGE_PIXELS,
+        help="Maximum decoded pixels per page",
     )
     parser.add_argument("--nemotron-model-dir", type=Path)
     parser.add_argument(

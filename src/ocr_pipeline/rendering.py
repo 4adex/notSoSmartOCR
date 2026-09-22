@@ -302,7 +302,20 @@ def _markdown_table(region: dict[str, Any]) -> str:
         if topology.has_spans or header_row_count == 0
         else _simple_markdown_table(topology)
     )
-    return block
+    return "\n\n".join(
+        part
+        for part in (
+            _escape_markdown_text(str(structure.get("leading_text", ""))),
+            block,
+            _escape_markdown_text(str(structure.get("trailing_text", ""))),
+        )
+        if part
+    )
+
+
+def _escape_markdown_text(text: str) -> str:
+    literal = re.sub(r"([\\`*_{}\[\]()#+.!|~-])", r"\\\1", escape(text, quote=False))
+    return literal.replace("\n", "<br>\n")
 
 
 def _simple_markdown_table(topology: TableTopology) -> str:

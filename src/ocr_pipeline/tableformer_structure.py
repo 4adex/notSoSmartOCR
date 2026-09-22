@@ -55,11 +55,11 @@ class TableFormerStructure:
             )
             try:
                 responses = call(crop)
+                return _parse_cells(responses)
             except ReaderError:
                 raise
             except Exception as error:
                 raise ReaderError("tableformer_predict_failed", str(error)) from error
-        return _parse_cells(responses)
 
     def model_provenance(self) -> dict[str, Any]:
         return {

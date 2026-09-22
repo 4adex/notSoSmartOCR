@@ -28,12 +28,28 @@ PROVIDER = "falcon-perception"
 # Match the presentation HTML span limit and bound expanded grids before allocation.
 MAX_TABLE_SPAN = 100
 MAX_TABLE_GRID_CELLS = 10_000
+TABLE_TEXT_BLOCK_TAGS = frozenset(
+    {
+        "p",
+        "div",
+        "caption",
+        "li",
+        "h1",
+        "h2",
+        "h3",
+        "h4",
+        "h5",
+        "h6",
+        "blockquote",
+        "pre",
+    }
+)
 HEADING = re.compile(r"^\s*(#{1,6})\s+(.*)$")
 # Only paired asterisks: a lone one is a real footnote mark on many clinical forms.
 EMPHASIS = re.compile(r"\*\*(.+?)\*\*")
 # Markup truncated mid-tag ("</sup" with no ">") is handed back as text, not a tag.
 # Layout categories that carry image pixels rather than text.
-EMPTY_CATEGORIES = frozenset({"image", "picture", "figure", "chart", "seal"})
+EMPTY_CATEGORIES = frozenset({"image", "picture", "figure", "chart", "seal", "form"})
 # Layout categories mapped onto the kinds the rest of the pipeline already understands.
 KIND_BY_CATEGORY = {
     "table": "table",
@@ -227,6 +243,9 @@ class FalconLayoutReader:
                             "layout_detection_score": element.get("score"),
                             "model": model,
                         },
+                        resolution="unreadable"
+                        if category == "form"
+                        else read_resolution,
                         structure={"image": asset},
                     )
                 )
@@ -370,9 +389,17 @@ class _TableParser(HTMLParser):
         self._span = (1, 1)
         self._header = False
         self._in_head = False
+        self._table_seen = False
+        self._outside: list[str] = []
+        self.leading_text = ""
+        self.trailing_text = ""
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
-        if tag == "thead":
+        if tag == "table":
+            if self._table_seen:
+                raise ValueError("Multiple or nested tables cannot share one cell grid")
+            self._table_seen = True
+        elif tag == "thead":
             self._in_head = True
         elif tag == "tr":
             # A row still open when the next one starts was never closed. The model's
@@ -382,6 +409,14 @@ class _TableParser(HTMLParser):
             self._row = []
         elif tag in {"td", "th"}:
             self._close_cell()
+            outside = "".join(self._outside).strip()
+            if outside and self.ranges:
+                raise ValueError(
+                    "Text interleaved with table cells cannot share one grid"
+                )
+            if outside:
+                self.leading_text = outside
+            self._outside = []
             values = dict(attrs)
             self._cell = []
             self._cell_start = self._offset() + len(self.get_starttag_text())
@@ -389,6 +424,8 @@ class _TableParser(HTMLParser):
             self._header = tag == "th" or self._in_head
         elif tag == "br" and self._cell is not None:
             self._cell.append("\n")
+        if self._cell is None and (tag == "br" or tag in TABLE_TEXT_BLOCK_TAGS):
+            self._outside.append("\n")
 
     def handle_endtag(self, tag: str) -> None:
         if tag == "thead":
@@ -397,15 +434,22 @@ class _TableParser(HTMLParser):
             self._close_row()
         elif tag in {"td", "th"}:
             self._close_cell()
+        elif tag == "table":
+            self._close_row()
+        if self._cell is None and tag in TABLE_TEXT_BLOCK_TAGS:
+            self._outside.append("\n")
 
     def handle_data(self, data: str) -> None:
         if self._cell is not None:
             self._cell.append(data)
+        else:
+            self._outside.append(data)
 
     def close(self) -> None:
         super().close()
         # Truncated markup closes nothing: no </td>, no </tr>, no </table>.
         self._close_row()
+        self.trailing_text = "".join(self._outside).strip()
 
     def _close_cell(self) -> None:
         if self._cell is None:
@@ -507,6 +551,8 @@ def _table_structure(
         "row_count": row_count,
         "column_count": column_count,
         "cells": cells,
+        **({"leading_text": parser.leading_text} if parser.leading_text else {}),
+        **({"trailing_text": parser.trailing_text} if parser.trailing_text else {}),
     }
 
 
@@ -532,7 +578,16 @@ def _table_text(structure: dict[str, Any]) -> str:
         grid[cell["row_nums"][0]][cell["column_nums"][0]] = cell["text"].replace(
             "\n", " "
         )
-    return "\n".join("\t".join(row).rstrip() for row in grid).strip()
+    table = "\n".join("\t".join(row).rstrip() for row in grid).strip()
+    return "\n".join(
+        text
+        for text in (
+            structure.get("leading_text"),
+            table,
+            structure.get("trailing_text"),
+        )
+        if text
+    )
 
 
 def _span(value: str | None) -> int:

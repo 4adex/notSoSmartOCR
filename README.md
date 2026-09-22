@@ -50,11 +50,11 @@ flowchart LR
     F --> G[Review and feedback]
 ```
 
-DocTR and Tesseract OSD provide orientation evidence. Heron detects document regions; Falcon-OCR reads their crops and generates text, table markup, and formulas. Table recognition uses Falcon-OCR. Images retain source pixels. Shared evidence drives rendering and review, with local KaTeX for math.
+The configuration verified on 13 September 2026 uses DocTR and Tesseract OSD for orientation, Heron layout inside the native Falcon server, and complete-region Falcon OCR. It retains source pixels and canonical evidence, with local KaTeX for math. An additional app-level Heron proposal pass, TableFormer, Nemotron, and external crop refinement are optional and inactive in this configuration. The demo composition endpoint reports the configuration of each running service.
 
 ## Walkthroughs
 
-Seven walkthroughs, including 100 pipeline questions, grounded in the code and technical reports:
+Walkthroughs grounded in the code, technical reports, and measured runs:
 
 | Read | Covers |
 | --- | --- |
@@ -65,9 +65,10 @@ Seven walkthroughs, including 100 pipeline questions, grounded in the code and t
 | [Inside Falcon-OCR](docs/walkthroughs/05-falcon-technical-report.md) | Early fusion, attention, training, and native serving |
 | [Document-parsing strategies](docs/walkthroughs/06-document-parsing-strategies.md) | Seven OCR systems and their architectural trade-offs |
 | [From research to implementation](docs/walkthroughs/07-research-to-implementation.md) | What we reused, what each paper taught us, and observed improvements |
+| [Fidelity repairs and routing results](docs/walkthroughs/08-fidelity-and-routing.md) | Current runtime, preserved table content, paired Qwen comparison, and remaining failures |
 
 **Hardware:** exercised on a 24 GB-class NVIDIA A10G. Minimum VRAM is not established; see the [memory breakdown](docs/walkthroughs/04-model-internals-and-hardware.md#vram-and-performance).
 
 ## Acknowledgements
 
-Thank you to the teams behind [Falcon-Perception](https://github.com/tiiuae/Falcon-Perception), [IBM's Heron layout model](https://huggingface.co/docling-project/docling-layout-heron-101), [DocTR](https://github.com/mindee/doctr), [Tesseract](https://github.com/tesseract-ocr/tesseract), [Poppler](https://gitlab.freedesktop.org/poppler/poppler), and [KaTeX](https://github.com/KaTeX/KaTeX). Heron comes from the Docling project; this demo uses its detector directly. Their respective licenses apply.
+Thank you to the teams behind [Falcon-Perception](https://github.com/tiiuae/Falcon-Perception), [IBM's Heron layout model](https://huggingface.co/docling-project/docling-layout-heron-101), [DocTR](https://github.com/mindee/doctr), [Tesseract](https://github.com/tesseract-ocr/tesseract), [Poppler](https://gitlab.freedesktop.org/poppler/poppler), and [KaTeX](https://github.com/KaTeX/KaTeX). Heron comes from the Docling project. Their respective licenses apply.
