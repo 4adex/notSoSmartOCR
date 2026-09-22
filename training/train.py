@@ -5,6 +5,7 @@ JSONL rows require image, text, kind, and image_id (original source identity).
 Image paths may be relative to the JSONL file. Optional category is text, table,
 formula, or code; code uses the official text prompt. Targets must follow
 that task's output format.
+An optional instruction replaces the complete native category prompt.
 Outputs are unmerged adapters and evaluation records, never serving defaults.
 """
 
@@ -37,6 +38,7 @@ def main() -> None:
     parser.add_argument("--accumulation", type=int, default=8)
     parser.add_argument("--max-new-tokens", type=int, default=4096)
     parser.add_argument("--seed", type=int, default=123)
+    parser.add_argument("--target-mask", action="store_true")
     args = parser.parse_args()
     if (
         any(
@@ -66,7 +68,13 @@ def run(args, train, validation) -> None:
     import torch
     from torch.nn import functional as F
     from falcon_perception import load_and_prepare_model, setup_torch_config
-    from model import add_lora, forward, load_adapter, prepare_batch
+    from model import (
+        add_lora,
+        add_target_embedding,
+        forward,
+        load_adapter,
+        prepare_batch,
+    )
 
     random.seed(args.seed)
     torch.manual_seed(args.seed)
@@ -76,6 +84,8 @@ def run(args, train, validation) -> None:
     )
     if model.args.perception_heads:
         raise ValueError("This experiment requires Falcon-OCR, not Falcon-Perception")
+    if getattr(args, "target_mask", False):
+        add_target_embedding(model)
     for row in train:
         ids = tokenizer._tok.encode(row["text"], add_special_tokens=False).ids
         if not ids or tokenizer.decode(ids) != row["text"]:
@@ -96,7 +106,10 @@ def run(args, train, validation) -> None:
         termination_id=tokenizer.end_of_query_token_id,
         dtype=str(model.dtype),
         torch_version=torch.__version__,
-        checkpoint_format="unmerged LoRA A/B tensors; alpha equals rank",
+        checkpoint_format="unmerged LoRA A/B tensors; alpha equals rank"
+        + (
+            "; additive target embedding" if getattr(args, "target_mask", False) else ""
+        ),
     )
     (args.output / "settings.json").write_text(json.dumps(settings, indent=2))
     before = evaluate(
@@ -170,6 +183,8 @@ def run(args, train, validation) -> None:
     model, tokenizer, config = load_and_prepare_model(
         hf_local_dir=str(args.model_dir), device="cuda", dtype="bfloat16", compile=False
     )
+    if getattr(args, "target_mask", False):
+        add_target_embedding(model)
     model = load_adapter(model, args.output / "adapter.pt", rank=args.rank)
     after = evaluate(
         model,
@@ -211,6 +226,10 @@ def load_rows(path: Path) -> list[dict]:
             "code",
         }:
             raise ValueError(f"{path}:{line_number}: unsupported OCR category")
+        if "instruction" in row and (
+            not isinstance(row["instruction"], str) or not row["instruction"].strip()
+        ):
+            raise ValueError(f"{path}:{line_number}: instruction must be nonempty text")
         image = Path(row["image"])
         if not image.is_absolute():
             image = path.parent / image
@@ -231,9 +250,12 @@ def prepare_prompt(model, tokenizer, config, row):
             prepared = _prepare_falcon_crop(image, 1024)
             try:
                 category = "text" if row["category"] == "code" else row["category"]
+                instruction = row.get(
+                    "instruction", OCRInferenceEngine._make_ocr_prompt(category)
+                )
                 prompt = process_batch_and_generate(
                     tokenizer,
-                    [(prepared.image, OCRInferenceEngine._make_ocr_prompt(category))],
+                    [(prepared.image, instruction)],
                     max_length=config.max_seq_len,
                     min_dimension=64,
                     max_dimension=1024,
@@ -242,12 +264,19 @@ def prepare_prompt(model, tokenizer, config, row):
                 prepared.image.close()
         finally:
             image.close()
+    if hasattr(model, "target_embedding"):
+        from model import target_patch_fractions
+
+        prompt["target_mask"] = target_patch_fractions(
+            model, prompt, row["target_polygons_normalized"]
+        )
     return {key: value.to(model.device) for key, value in prompt.items()}
 
 
 def evaluate(model, tokenizer, config, rows, output, max_new_tokens):
     from falcon_perception.batch_inference import BatchInferenceEngine
     from falcon_perception.sampling import sample_token
+    from model import target_conditioning
 
     model.eval()
     engine = BatchInferenceEngine(
@@ -276,7 +305,11 @@ def evaluate(model, tokenizer, config, rows, output, max_new_tokens):
 
             try:
                 prompt = prepare_prompt(model, tokenizer, config, row)
-                with patch("falcon_perception.batch_inference.sample_token", sample):
+                fractions = prompt.pop("target_mask", None)
+                with (
+                    target_conditioning(model, fractions),
+                    patch("falcon_perception.batch_inference.sample_token", sample),
+                ):
                     engine.generate(
                         **prompt,
                         max_new_tokens=max_new_tokens,

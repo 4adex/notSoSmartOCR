@@ -212,6 +212,8 @@ def _uncovered_regions(
 
 def _word_entry(word: TextRegion, present: bool) -> dict[str, object]:
     return {
+        "source_region_id": word.id,
+        "provider": word.provider,
         "text": word.text,
         "bbox": _box_dict(word.bounding_box),
         "confidence": word.confidence,

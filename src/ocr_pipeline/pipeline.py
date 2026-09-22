@@ -423,6 +423,23 @@ def _read_page(
                 record_failure(page_number, error)
         finally:
             _add_timing(timings, "recover", recovery_started)
+    page_text = render_evidence(regions)
+    readable_ids = {
+        region.id
+        for region in regions
+        if region.resolution == "resolved"
+        and (region.text.strip() or region.kind == "checkbox")
+    }
+    if not page_failure_ids and not readable_ids.intersection(page_text.evidence_ids):
+        failure = _failure(
+            "ocr",
+            "no_text_detected",
+            "No readable text was available after processing",
+            page_number,
+            len(failures) + 1,
+        )
+        failures.append(failure)
+        page_failure_ids.append(failure.id)
     page_needs_review = getattr(reader, "page_needs_review", None)
     reader_review = bool(callable(page_needs_review) and page_needs_review(page_number))
     needs_review = (
@@ -436,7 +453,7 @@ def _read_page(
         height=height,
         reader=reader.name,
         route="review" if needs_review else "accept_local",
-        text=render_evidence(regions),
+        text=page_text,
         regions=regions,
         failure_ids=page_failure_ids,
     )

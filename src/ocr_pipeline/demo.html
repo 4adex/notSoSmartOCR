@@ -3303,7 +3303,17 @@
       wrapper.dataset.regionRole = region.structure?.role || "table";
       const cells = normalizedTableCells(region.structure?.cells || [], region.id);
       if (!cells.length) {
-        appendEvidenceRun(wrapper, [region]);
+        if (region.text_provenance?.table_structure_error && region.text) {
+          const literal = document.createElement("pre");
+          literal.textContent = region.text;
+          const evidence = document.createElement("details");
+          const label = document.createElement("summary");
+          label.textContent = "Unparsed table: review model evidence";
+          evidence.append(label, literal);
+          wrapper.append(evidence);
+        } else {
+          appendEvidenceRun(wrapper, [region]);
+        }
         return wrapper;
       }
 
@@ -3363,7 +3373,17 @@
         body.append(row);
       }
       table.append(body);
+      if (region.structure?.leading_text) {
+        const leading = document.createElement("p");
+        appendEvidenceRun(leading, [{ ...region, text: region.structure.leading_text }]);
+        wrapper.append(leading);
+      }
       wrapper.append(table);
+      if (region.structure?.trailing_text) {
+        const trailing = document.createElement("p");
+        appendEvidenceRun(trailing, [{ ...region, text: region.structure.trailing_text }]);
+        wrapper.append(trailing);
+      }
       return wrapper;
     }
 
